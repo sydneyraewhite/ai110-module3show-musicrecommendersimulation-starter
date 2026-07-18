@@ -51,6 +51,26 @@ Information my UserProfile stores:
 
 How the score is computed and songs are chosen: the Recommender scores each song individually — awarding points for matching the user's genre and mood, and rewarding songs whose energy is close to target_energy (proximity, not just high energy). It then ranks all songs by score and returns the top k.
 
+### Algorithm Recipe
+
+For every song in the catalog, I start the score at `0.0` and add points as follows:
+
+1. **Genre match (+2.0):** if the song's `genre` exactly equals the user's `favorite_genre`, add 2.0. Otherwise add nothing.
+2. **Mood match (+1.5):** if the song's `mood` exactly equals the user's `favorite_mood`, add 1.5. Otherwise add nothing.
+3. **Energy fit (+0.0 to +2.0, scaled):** measure closeness as `1.0 - abs(song.energy - target_energy)`, then add `2.0 × closeness`. A perfect match adds the full 2.0; the score falls off linearly the further the song's energy is from the target.
+4. **Acoustic preference (+0.5):** treat a song as "acoustic" if `acousticness > 0.5`. If that True/False label matches the user's `likes_acoustic`, add 0.5.
+
+Then **rank all songs by total score, highest first, and return the top `k`** (default 5). Ties keep their original catalog order.
+
+The relative weights encode my priorities: **genre and a perfect energy fit are worth the most (2.0 each), mood is close behind (1.5), and acoustic feel is a light tiebreaker (0.5).** Only genre and energy can single-handedly separate two songs; mood and acoustic mostly break ties. These weights live at the top of `recommender.py` so they are easy to tune (see *Experiments You Tried*).
+
+### Potential Biases I Expect
+
+- **Genre over-prioritization.** Because an exact genre match is worth the most and pays out all-or-nothing, the system may over-prioritize genre and overlook great songs that match the user's mood and energy but carry a different genre label. A "happy, high-energy" listener whose favorite genre is `pop` will be steered toward pop tracks even when an `indie pop` or `edm` song is a better emotional fit.
+- **Rigid label matching.** Genre and mood must match *exactly* — `pop` and `indie pop` score as complete strangers, and `chill` earns nothing against `relaxed` or `laid-back` even though they're near-synonyms. The model has no notion of similar-but-not-identical labels.
+- **Filter bubble.** Since songs win by sitting close to what the user already stated, the recommender reinforces existing taste and rarely surprises the listener with something new — the same tradeoff real platforms fight with "discovery" features.
+- **Tiny, hand-authored catalog.** With only 18 songs and human-assigned genre/mood tags, any labeling quirk in the data set is amplified, and sparse genres (one metal song, one reggae song) can never form a strong recommendation on their own.
+
 ---
 
 ## Getting Started
@@ -90,16 +110,49 @@ You can add more tests in `tests/test_recommender.py`.
 
 ## Sample Recommendation Output
 
-Paste a sample of your recommender's output here as a text block so a reader can see what it produces:
+Running `python -m src.main` against the 18-song catalog with the profile
+`genre=pop, mood=happy, energy=0.8` produces:
 
 ```
-# e.g.:
-# User profile: genre=indie, mood=chill, energy=low
-# Recommendations:
-#   1. ...
-#   2. ...
-#   3. ...
+Loaded songs: 18
+
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: genre=pop, mood=happy, energy=0.8
+========================================================
+
+  1. Sunrise City  —  Neon Echo
+     score: 5.46
+     why:
+       • genre match: pop (+2.0)
+       • mood match: happy (+1.5)
+       • energy 0.82 vs target 0.8 (+1.96)
+
+  2. Gym Hero  —  Max Pulse
+     score: 3.74
+     why:
+       • genre match: pop (+2.0)
+       • energy 0.93 vs target 0.8 (+1.74)
+
+  3. Rooftop Lights  —  Indigo Parade
+     score: 3.42
+     why:
+       • mood match: happy (+1.5)
+       • energy 0.76 vs target 0.8 (+1.92)
+
+  4. Block Party  —  Cassette King
+     score: 1.90
+     why:
+       • energy 0.85 vs target 0.8 (+1.90)
+
+  5. Night Drive Loop  —  Neon Echo
+     score: 1.90
+     why:
+       • energy 0.75 vs target 0.8 (+1.90)
 ```
+
+Notice how the reasons sum to the score (e.g. 2.0 + 1.5 + 1.96 = 5.46), so
+every recommendation is fully explainable.
 
 **Screenshot or video** *(optional)*: <!-- Insert a screenshot or demo video link here -->
 

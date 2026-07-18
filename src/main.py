@@ -17,6 +17,27 @@ except ImportError:
     from recommender import load_songs, recommend_songs
 
 
+def print_recommendations(user_prefs: dict, recommendations: list) -> None:
+    """Print recommendations in a clean, readable terminal layout."""
+    profile = ", ".join(f"{key}={value}" for key, value in user_prefs.items())
+
+    print()
+    print("=" * 56)
+    print(f"  🎵  Top {len(recommendations)} recommendations")
+    print(f"      for taste profile: {profile}")
+    print("=" * 56)
+
+    for rank, (song, score, explanation) in enumerate(recommendations, start=1):
+        print()
+        print(f"  {rank}. {song['title']}  —  {song['artist']}")
+        print(f"     score: {score:.2f}")
+        print("     why:")
+        for reason in explanation.split("; "):
+            print(f"       • {reason}")
+
+    print()
+
+
 def main() -> None:
     songs = load_songs("data/songs.csv")
     print(f"Loaded songs: {len(songs)}")
@@ -25,15 +46,7 @@ def main() -> None:
     user_prefs = {"genre": "pop", "mood": "happy", "energy": 0.8}
 
     recommendations = recommend_songs(user_prefs, songs, k=5)
-
-    print("\nTop recommendations:\n")
-    for rec in recommendations:
-        # You decide the structure of each returned item.
-        # A common pattern is: (song, score, explanation)
-        song, score, explanation = rec
-        print(f"{song['title']} - Score: {score:.2f}")
-        print(f"Because: {explanation}")
-        print()
+    print_recommendations(user_prefs, recommendations)
 
 
 if __name__ == "__main__":
