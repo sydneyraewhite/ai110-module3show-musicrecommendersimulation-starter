@@ -41,12 +41,7 @@ class UserProfile:
 
 
 def proximity_score(value: float, target: float) -> float:
-    """
-    Score a 0-1 numeric feature by CLOSENESS to a target, not by magnitude.
-    Returns 1.0 at a perfect match, falling linearly to 0.0 at maximum distance.
-    This is what lets a low-energy user be rewarded for calm songs instead of
-    always preferring the loudest track.
-    """
+    """Score a 0-1 feature by closeness to a target (1.0 = exact match, down to 0.0)."""
     return 1.0 - abs(value - target)
 
 
@@ -99,16 +94,7 @@ class Recommender:
 
 
 def load_songs(csv_path: str) -> List[Dict]:
-    """
-    Loads songs from a CSV file into a list of dicts, converting each numeric
-    column to the right type so scoring math works later.
-
-    - int columns:   id, tempo_bpm         (whole numbers)
-    - float columns: energy, valence,       (continuous 0-1 audio features)
-                     danceability, acousticness
-    Text columns (title, artist, genre, mood) are left as strings.
-    Required by src/main.py
-    """
+    """Load songs from a CSV into a list of dicts, casting numeric columns to int/float."""
     int_cols = {"id", "tempo_bpm"}
     float_cols = {"energy", "valence", "danceability", "acousticness"}
 
@@ -126,12 +112,7 @@ def load_songs(csv_path: str) -> List[Dict]:
 
 
 def score_song(user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
-    """
-    Scores a single song (dict) against user preferences (dict).
-    Accepts flexible preference keys so it works with main.py's profile
-    ({"genre", "mood", "energy"}) and richer profiles alike.
-    Returns (score, reasons).
-    """
+    """Score one song dict against user preferences; returns (score, reasons)."""
     score = 0.0
     reasons: List[str] = []
 
@@ -174,11 +155,7 @@ def _judge(user_prefs: Dict, song: Dict) -> Tuple[Dict, float, str]:
 def recommend_songs(
     user_prefs: Dict, songs: List[Dict], k: int = 5
 ) -> List[Tuple[Dict, float, str]]:
-    """
-    Scores and ranks all songs, returning the top k as
-    (song_dict, score, explanation) tuples.
-    Required by src/main.py
-    """
+    """Judge every song, then return the top k as (song, score, explanation) tuples, best first."""
     # 1. JUDGE every song in the catalog with score_song (via _judge).
     scored = (_judge(user_prefs, song) for song in songs)
     # 2. RANK by score (index 1), highest first, and 3. keep the top k.
