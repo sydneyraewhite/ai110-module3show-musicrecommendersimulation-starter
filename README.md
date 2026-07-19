@@ -64,6 +64,29 @@ Then **rank all songs by total score, highest first, and return the top `k`** (d
 
 The relative weights encode my priorities: **genre and a perfect energy fit are worth the most (2.0 each), mood is close behind (1.5), and acoustic feel is a light tiebreaker (0.5).** Only genre and energy can single-handedly separate two songs; mood and acoustic mostly break ties. These weights live at the top of `recommender.py` so they are easy to tune (see *Experiments You Tried*).
 
+### Diversity Penalty (optional)
+
+By default the top `k` is just the highest-scoring songs, which can stack the list
+with the same artist or genre. Turning on the **diversity penalty** spreads the
+results out. Instead of sorting once, it builds the list one song at a time and
+penalizes any candidate that repeats something already chosen:
+
+- **−1.5** for every song already in the list by the **same artist**
+- **−0.75** for every song already in the list in the **same genre**
+
+The first song from an artist or genre is never penalized; the penalty only grows
+as repeats pile up. This lets a slightly lower-scoring but *fresh* song beat a second
+song from an artist who is already represented. For a `lofi / chill / 0.4` profile,
+this drops the second song by the same lofi artist out of the top 5 and pulls in an
+ambient, a jazz, and a folk track instead.
+
+Enable it with `recommend_songs(..., diversity=True)` (or `Recommender.recommend(..., diversity=True)`),
+or from the command line:
+
+```bash
+python -m src.main balanced diverse
+```
+
 ### Potential Biases I Expect
 
 - **Genre over-prioritization.** Because an exact genre match is worth the most and pays out all-or-nothing, the system may over-prioritize genre and overlook great songs that match the user's mood and energy but carry a different genre label. A "happy, high-energy" listener whose favorite genre is `pop` will be steered toward pop tracks even when an `indie pop` or `edm` song is a better emotional fit.
@@ -166,6 +189,339 @@ Use this section to document the experiments you ran. For example:
 - What happened when you added tempo or valence to the score
 - How did your system behave for different types of users
 
+### Adversarial / Edge-Case Profiles
+
+To stress-test the scoring logic I built a harness ([`src/adversarial.py`](src/adversarial.py),
+run with `python -m src.adversarial`) that feeds it profiles designed to expose
+weaknesses. The raw terminal output for each is below.
+
+**1. Conflicting energy vs. mood** — mood and energy are scored independently,
+so a "sad" + high-energy profile can't be satisfied by one song. The catalog has
+no `sad` song at all, so the mood constraint silently evaporates and the recs are
+driven purely by genre + energy:
+
+```
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: genre=pop, mood=sad, energy=0.9
+========================================================
+
+  1. Gym Hero  —  Max Pulse
+     score: 3.94
+     why:
+       • genre match: pop (+2.0)
+       • energy 0.93 vs target 0.9 (+1.94)
+
+  2. Sunrise City  —  Neon Echo
+     score: 3.84
+     why:
+       • genre match: pop (+2.0)
+       • energy 0.82 vs target 0.9 (+1.84)
+
+  3. Storm Runner  —  Voltline
+     score: 1.98
+     why:
+       • energy 0.91 vs target 0.9 (+1.98)
+
+  4. Neon Horizon  —  Pulse Theory
+     score: 1.90
+     why:
+       • energy 0.95 vs target 0.9 (+1.90)
+
+  5. Block Party  —  Cassette King
+     score: 1.90
+     why:
+       • energy 0.85 vs target 0.9 (+1.90)
+```
+
+**2. Energy above range (5.0) — no clamping.** `proximity_score` is never
+bounded, so every score goes negative and the "top" recommendation has a score
+of −4.18:
+
+```
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: genre=rock, energy=5.0
+========================================================
+
+  1. Storm Runner  —  Voltline
+     score: -4.18
+     why:
+       • genre match: rock (+2.0)
+       • energy 0.91 vs target 5.0 (+-6.18)
+
+  2. Iron Verdict  —  Ashfall
+     score: -6.04
+     why:
+       • energy 0.98 vs target 5.0 (+-6.04)
+
+  3. Neon Horizon  —  Pulse Theory
+     score: -6.10
+     why:
+       • energy 0.95 vs target 5.0 (+-6.10)
+
+  4. Gym Hero  —  Max Pulse
+     score: -6.14
+     why:
+       • energy 0.93 vs target 5.0 (+-6.14)
+
+  5. Block Party  —  Cassette King
+     score: -6.30
+     why:
+       • energy 0.85 vs target 5.0 (+-6.30)
+```
+
+**3. Energy below range (-1.0) — no clamping.** Negative target distorts the
+energy axis; scores again dip below zero:
+
+```
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: genre=rock, energy=-1.0
+========================================================
+
+  1. Storm Runner  —  Voltline
+     score: 0.18
+     why:
+       • genre match: rock (+2.0)
+       • energy 0.91 vs target -1.0 (+-1.82)
+
+  2. Spacewalk Thoughts  —  Orbit Bloom
+     score: -0.56
+     why:
+       • energy 0.28 vs target -1.0 (+-0.56)
+
+  3. Winter Elegy  —  Aria Solenne
+     score: -0.60
+     why:
+       • energy 0.3 vs target -1.0 (+-0.60)
+
+  4. Library Rain  —  Paper Lanterns
+     score: -0.70
+     why:
+       • energy 0.35 vs target -1.0 (+-0.70)
+
+  5. Coffee Shop Stories  —  Slow Stereo
+     score: -0.74
+     why:
+       • energy 0.37 vs target -1.0 (+-0.74)
+```
+
+**4. Typo / wrong casing — silent zero.** Matching is exact and case-sensitive,
+so `Pop`/`Happy` match nothing and five songs tie at 0.00:
+
+```
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: genre=Pop, mood=Happy
+========================================================
+
+  1. Sunrise City  —  Neon Echo
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  2. Midnight Coding  —  LoRoom
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  3. Storm Runner  —  Voltline
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  4. Library Rain  —  Paper Lanterns
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  5. Gym Hero  —  Max Pulse
+     score: 0.00
+     why:
+       • a broad match for your taste
+```
+
+**5. Unknown genre + valid mood.** `k-pop` matches nothing, but `melancholy`
+*does* exist — so a self-described k-pop fan's #1 recommendation is a **classical**
+track. Genre was ignored; mood alone drove the result:
+
+```
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: genre=k-pop, mood=melancholy
+========================================================
+
+  1. Winter Elegy  —  Aria Solenne
+     score: 1.50
+     why:
+       • mood match: melancholy (+1.5)
+
+  2. Sunrise City  —  Neon Echo
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  3. Midnight Coding  —  LoRoom
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  4. Storm Runner  —  Voltline
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  5. Library Rain  —  Paper Lanterns
+     score: 0.00
+     why:
+       • a broad match for your taste
+```
+
+**6. Empty profile.** No signal at all: every song scores 0.00 and the ranking
+silently falls back to raw CSV order:
+
+```
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: 
+========================================================
+
+  1. Sunrise City  —  Neon Echo
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  2. Midnight Coding  —  LoRoom
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  3. Storm Runner  —  Voltline
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  4. Library Rain  —  Paper Lanterns
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  5. Gym Hero  —  Max Pulse
+     score: 0.00
+     why:
+       • a broad match for your taste
+```
+
+**7. Acoustic freebie (`likes_acoustic=False`).** A non-acoustic song *also*
+earns the +0.5 match, so nearly every song collects the point — it barely
+discriminates and produces a wall of ties:
+
+```
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: likes_acoustic=False
+========================================================
+
+  1. Sunrise City  —  Neon Echo
+     score: 0.50
+     why:
+       • acoustic preference match (+0.5)
+
+  2. Storm Runner  —  Voltline
+     score: 0.50
+     why:
+       • acoustic preference match (+0.5)
+
+  3. Gym Hero  —  Max Pulse
+     score: 0.50
+     why:
+       • acoustic preference match (+0.5)
+
+  4. Night Drive Loop  —  Neon Echo
+     score: 0.50
+     why:
+       • acoustic preference match (+0.5)
+
+  5. Rooftop Lights  —  Indigo Parade
+     score: 0.50
+     why:
+       • acoustic preference match (+0.5)
+```
+
+**8. Weight collision (`genre` and a perfect `energy` fit are both worth 2.0).**
+A rock song with far-from-target energy barely edges out low-energy non-rock
+songs, making the intended priority ambiguous:
+
+```
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: genre=rock, energy=0.0
+========================================================
+
+  1. Storm Runner  —  Voltline
+     score: 2.18
+     why:
+       • genre match: rock (+2.0)
+       • energy 0.91 vs target 0.0 (+0.18)
+
+  2. Spacewalk Thoughts  —  Orbit Bloom
+     score: 1.44
+     why:
+       • energy 0.28 vs target 0.0 (+1.44)
+
+  3. Winter Elegy  —  Aria Solenne
+     score: 1.40
+     why:
+       • energy 0.3 vs target 0.0 (+1.40)
+
+  4. Library Rain  —  Paper Lanterns
+     score: 1.30
+     why:
+       • energy 0.35 vs target 0.0 (+1.30)
+
+  5. Coffee Shop Stories  —  Slow Stereo
+     score: 1.26
+     why:
+       • energy 0.37 vs target 0.0 (+1.26)
+```
+
+**9. Type confusion (`likes_acoustic="yes"`).** The truthy string is compared
+with `==` against a bool, which is always `False`, so the term silently vanishes
+— "looks configured, does nothing":
+
+```
+========================================================
+  🎵  Top 5 recommendations
+      for taste profile: likes_acoustic=yes
+========================================================
+
+  1. Sunrise City  —  Neon Echo
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  2. Midnight Coding  —  LoRoom
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  3. Storm Runner  —  Voltline
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  4. Library Rain  —  Paper Lanterns
+     score: 0.00
+     why:
+       • a broad match for your taste
+
+  5. Gym Hero  —  Max Pulse
+     score: 0.00
+     why:
+       • a broad match for your taste
+```
+
 ---
 
 ## Limitations and Risks
@@ -188,10 +544,45 @@ Read and complete `model_card.md`:
 
 [**Model Card**](model_card.md)
 
-Write 1 to 2 paragraphs here about what you learned:
+### Personal Reflection on My Engineering Process
 
-- about how recommenders turn data into predictions
-- about where bias or unfairness could show up in systems like this
+My biggest learning moment was not writing the scoring rules — it was trying to
+break them. The recommender looked finished and correct when I fed it normal
+profiles. But when I built a set of adversarial profiles (conflicting tastes,
+out-of-range energy, typos, empty input), it fell apart in quiet ways. An energy
+value of 5.0 produced negative scores that were still shown as "top picks." A typo
+in the genre made every song tie at zero, and the list just fell back to catalog
+order while still looking like a real recommendation. That was the moment the
+project clicked for me: the hard part of engineering is not making something work
+on the happy path, it is figuring out how it fails on the messy input real users
+actually type.
+
+Using AI tools sped up the parts that would have taken me a long time by hand. They
+helped me build the test harness, run many profiles at once, and turn raw output
+into clear tables and comparisons. Where I had to double-check was the *reasoning*,
+not the typing. When a tool claimed one song was "dominating" the results, I ran an
+actual sweep of eight profiles and saw eight different winners — so the claim was
+wrong, and the real issue was elsewhere. I also had to verify the math myself: I
+checked that the reason lines still added up to the score after I changed the code,
+and I caught that two "tied" songs were actually separated by a tiny floating-point
+difference. The tools were great at doing and explaining, but I still had to be the
+one who confirmed the numbers were true.
+
+What surprised me most was how much a plain scorecard can *feel* like a real
+recommendation. There is no learning, no neural network, no data from other
+users — just add up a few points and sort. Yet when the top result is a happy pop
+song for a happy pop fan, complete with reasons, it feels smart. That made me
+realize how much of the "intelligence" we sense in apps like Spotify might be
+simpler scoring than we assume, and how easily a simple rule can hide a bias in
+plain sight (like my energy formula quietly ignoring moderate-energy listeners).
+
+If I extended this project, I would first add real input validation so bad
+profiles fail loudly instead of silently. Next I would use the features the dataset
+already has but the model ignores — valence, tempo, and danceability — so users
+could ask for more than genre, mood, and energy. Finally I would add near-match
+scoring and a diversity rule, so "pop" and "indie pop" are treated as cousins and
+the top five are not all the same genre. That would make the recommendations feel
+less like a strict filter and a little more like discovery.
 
 
 
